@@ -11,3 +11,16 @@ Previously, bi-directional visual co-creation was impossible. An AI could genera
 
 How WebMCP was implemented:
 The application is built using React and HTML5 Canvas. WebMCP is implemented directly in the frontend lifecycle using document.modelContext.registerTool(). Tools like create_canvas_node, connect_nodes, and auto_layout_nodes are registered with strict JSON inputSchema definitions. When the agent executes a tool, the payload updates the local React state arrays, instantly triggering a re-render of the canvas to reflect the agent's changes.
+
+## Local development
+
+```bash
+npm install
+npm run dev
+```
+
+## Build
+
+```bash
+npm run build
+```
