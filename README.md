@@ -1,20 +1,27 @@
 # webmcp-canvas-builder
 
-**Why this use case is a strong fit for WebMCP:** Traditional AI tools output static code or images, forcing users to leave their workspace to copy-paste results. This visual canvas utilizes WebMCP to allow the AI agent to manipulate the live DOM and canvas state directly. Both the human and the agent edit the exact same workspace simultaneously without abstract text barriers.
+## Why this use case is a strong fit for WebMCP
 
-**How it creates a better user experience:** It eliminates prompt-engineering friction and context loss. The user can manually drag a node into place, then simply ask the agent to "connect the database to the API" or "rearrange these nodes into a grid." The agent executes these actions instantly on the active web page, providing immediate, visual side-by-side feedback.
+Traditional AI tools output static code or images, forcing users to leave their workspace to copy-paste results. This visual canvas utilizes WebMCP to allow the AI agent to manipulate the live DOM and canvas state directly. Both the human and the agent edit the exact same workspace simultaneously without abstract text barriers.
 
-**What people and agents can do together that was difficult/impossible before:** Previously, bi-directional visual co-creation was impossible. An AI could generate a flowchart, but a human couldn't manually drag one piece and ask the AI to recalculate the rest of the layout natively in the browser. WebMCP bridges this gap, turning the AI from a passive chatbot into an active design co-pilot that shares the same real-time visual context as the user.
+## How it creates a better user experience
 
-**How WebMCP was implemented:** The application is built using React and HTML5 Canvas. WebMCP is implemented directly in the frontend lifecycle using `document.modelContext.registerTool()`. Tools like `create_canvas_node`, `connect_nodes`, and `auto_layout_nodes` are registered with strict JSON `inputSchema` definitions. When the agent executes a tool, the payload updates the local React state arrays, instantly triggering a re-render of the canvas to reflect the agent's changes. Tools are registered with an `AbortSignal` so they can be cleanly unregistered on unmount, per the WebMCP spec.
+It eliminates prompt-engineering friction and context loss. The user can manually drag a node into place, then simply ask the agent to "connect the database to the API" or "rearrange these nodes into a grid." The agent executes these actions instantly on the active web page, providing immediate, visual side-by-side feedback.
 
----
+## What people and agents can do together
+
+Previously, bi-directional visual co-creation was impossible. An AI could generate a flowchart, but a human couldn't manually drag one piece and ask the AI to recalculate the rest of the layout natively in the browser. WebMCP bridges this gap, turning the AI from a passive chatbot into an active design co-pilot that shares the same real-time visual context as the user.
+
+## How WebMCP was implemented
+
+The application is built using React and HTML5 Canvas. WebMCP is implemented directly in the frontend lifecycle using `document.modelContext.registerTool()`. Tools like `create_canvas_node`, `connect_nodes`, and `auto_layout_nodes` are registered with strict JSON inputSchema definitions. When the agent executes a tool, the payload updates the local React state arrays, instantly triggering a re-render of the canvas to reflect the agent's changes. Tools are registered with an AbortSignal so they can be cleanly unregistered on unmount, per the WebMCP spec.
 
 ## Tools
 
-All seven tools are registered in `App.jsx` inside a single `useEffect`, scoped to one `AbortController` for lifecycle cleanup. Every action an agent takes is origin-tagged (`agent` vs `human`) and surfaced in the on-canvas activity feed, so a reviewer can see — not just infer — what the agent changed.
+All seven tools are registered in App.jsx inside a single useEffect, scoped to one AbortController for lifecycle cleanup. Every action an agent takes is origin-tagged (agent vs human) and surfaced in the on-canvas activity feed, so a reviewer can see — not just infer — what the agent changed.
 
-### `get_canvas_state`
+### get_canvas_state
+
 Read-only. Returns the full current graph — call this before `auto_layout_nodes` or `connect_nodes` if the agent needs to reason about what's already there instead of acting blind.
 
 ```json
@@ -27,7 +34,8 @@ Read-only. Returns the full current graph — call this before `auto_layout_node
 
 **Returns:** `{ status: "success", nodes: [...], connections: [...] }`
 
-### `create_canvas_node`
+### create_canvas_node
+
 Creates a new node on the canvas.
 
 ```json
@@ -49,17 +57,8 @@ Creates a new node on the canvas.
 
 **Returns:** `{ status: "success", nodeId: string }`
 
-**Example call:**
-```js
-const tools = await document.modelContext.getTools();
-const tool = tools.find(t => t.name === "create_canvas_node");
-await document.modelContext.executeTool(
-  tool,
-  JSON.stringify({ label: "Postgres DB", type: "Database" })
-);
-```
+### connect_nodes
 
-### `connect_nodes`
 Draws a connection between two existing nodes, matched by (partial, case-insensitive) label.
 
 ```json
@@ -79,51 +78,32 @@ Draws a connection between two existing nodes, matched by (partial, case-insensi
 
 **Returns:** `{ status: "success" }` or `{ status: "error", error: "Nodes not found" }`
 
-**Example call:**
-```js
-const tools = await document.modelContext.getTools();
-const tool = tools.find(t => t.name === "connect_nodes");
-await document.modelContext.executeTool(
-  tool,
-  JSON.stringify({ fromLabel: "Postgres DB", toLabel: "WebMCP Host" })
-);
-```
+### auto_layout_nodes
 
-### `auto_layout_nodes`
 Rearranges every node on the canvas into a horizontal pipeline or a grid.
-
-```json
-{
-  "name": "auto_layout_nodes",
-  "description": "Automatically rearranges canvas nodes into a grid or pipeline.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "layoutType": { "type": "string", "enum": ["horizontal", "grid"] }
-    },
     "required": ["layoutType"]
   }
 }
-```
 
-**Returns:** `{ status: "success" }`
+Returns: { status: "success" }
 
-**Example call:**
-```js
+Example call:
+
 const tools = await document.modelContext.getTools();
+
 const tool = tools.find(t => t.name === "auto_layout_nodes");
+
 await document.modelContext.executeTool(
   tool,
   JSON.stringify({ layoutType: "grid" })
 );
-```
 
-> **Note on `executeTool`:** the current Chrome implementation expects the second argument as a **JSON string**, not a live object — it calls `JSON.parse()` on it internally. Always `JSON.stringify()` your input when calling `executeTool` manually from the console or a test harness.
+Note on executeTool: Chrome's current WebMCP implementation expects manually supplied tool arguments as a valid JSON string, so the examples below use JSON.stringify(...). The WebMCP specification is still evolving, and the latest draft describes executeTool() with an object input, so this may change as Chrome converges on the spec.
 
-### `remove_node`
+remove_node
+
 Removes a node (and any connections to it) by label.
 
-```json
 {
   "name": "remove_node",
   "description": "Removes a node from the canvas by label, along with any connections to it.",
@@ -135,14 +115,13 @@ Removes a node (and any connections to it) by label.
     "required": ["label"]
   }
 }
-```
 
-**Returns:** `{ status: "success" }` or `{ status: "error", error: "Node not found" }`
+Returns: { status: "success" } or { status: "error", error: "Node not found" }
 
-### `disconnect_nodes`
+disconnect_nodes
+
 Removes the connection between two nodes, if one exists.
 
-```json
 {
   "name": "disconnect_nodes",
   "description": "Removes the connection between two nodes, if one exists.",
@@ -155,60 +134,110 @@ Removes the connection between two nodes, if one exists.
     "required": ["fromLabel", "toLabel"]
   }
 }
-```
 
-**Returns:** `{ status: "success" }` or `{ status: "error", error: "No connection between those nodes" }`
+Returns: { status: "success" } or { status: "error", error: "No connection between those nodes" }
 
 These close the symmetry gap in the first version of this app, where the agent could only add to the canvas. A human can now also delete a node from the sidebar (× button, or select + press Delete/Backspace on the canvas).
 
-### `flag_for_review` — scoped with `exposedTo`
+flag_for_review — scoped with exposedTo
 
-Unlike the tools above, this one is **not** registered with default (same-origin-only) visibility. It demonstrates WebMCP's cross-origin permission model:
+Unlike the tools above, this tool demonstrates WebMCP's cross-origin permission model.
 
-```js
 document.modelContext.registerTool(
   {
     name: "flag_for_review",
     description: "Marks a node as flagged for design review.",
     inputSchema: {
       type: "object",
-      properties: { label: { type: "string" } },
+      properties: {
+        label: { type: "string" }
+      },
       required: ["label"],
     },
-    execute: async (input) => { /* ... */ },
+    execute: async (input) => {
+      /* ... */
+    },
   },
-  { exposedTo: ["https://webmcp-reviewer.example"] }
+  {
+    exposedTo: ["https://webmcp-reviewer.example"]
+  }
 );
-```
 
-`exposedTo` widens visibility of *this specific tool* to the listed origins, on top of the default same-origin access every tool already has. A cross-origin document can only see or call it if:
-1. its origin is in the `exposedTo` list, **and**
-2. it's been granted the `tools` Permissions Policy — e.g. `<iframe src="https://webmcp-reviewer.example" allow="tools"></iframe>`.
+exposedTo allows this specific tool to be discovered and executed by the listed cross-origin document. Same-origin access continues to work normally.
 
-**To test this for real** (a single page can't demo cross-origin access to itself):
-1. Serve this app on one local origin, e.g. `http://localhost:5173`.
-2. Serve a second minimal page — the "reviewer" — on a different origin, e.g. `http://localhost:5174`.
-3. Embed the canvas app in the reviewer page: `<iframe src="http://localhost:5173" allow="tools"></iframe>`.
-4. From the reviewer page's script, reach into the iframe's `contentDocument.modelContext` (or use `getTools({ exposedTo: true })` per spec) and call `flag_for_review`.
-5. Change `REVIEWER_ORIGINS` in `App.jsx` to match your reviewer's real origin — `https://webmcp-reviewer.example` is a placeholder.
+For cross-origin access, three things must line up:
 
-Without step 5, no cross-origin caller will be able to reach the tool — same-origin agents (the ones actually driving the demo) are unaffected either way.
+The reviewer origin must be listed in the tool's exposedTo configuration.
 
----
+The canvas iframe must be granted the WebMCP tools Permissions Policy using allow="tools".
 
-## Testing tools manually
+The reviewer must explicitly request tools from the canvas origin using getTools({ fromOrigins: [...] }).
 
-With the app running and a WebMCP-enabled browser (or the [MCP-B polyfill](https://github.com/WebMCP-org/npm-packages)):
+Testing the cross-origin flow
 
-```js
+A real cross-origin test requires two different origins.
+
+Assume:
+
+Canvas:   https://canvas.example
+Reviewer: https://reviewer.example
+
+Set the reviewer origin in App.jsx:
+
+const REVIEWER_ORIGINS = ["https://reviewer.example"];
+
+The reviewer page embeds NodeCraft:
+
+<iframe
+  src="https://canvas.example"
+  allow="tools"
+></iframe>
+
+Then the reviewer page discovers tools exposed by the canvas:
+
+const tools = await document.modelContext.getTools({
+  fromOrigins: ["https://canvas.example"],
+});
+
+const flagTool = tools.find(
+  (tool) => tool.name === "flag_for_review"
+);
+
+console.log(flagTool);
+
+The reviewer can then execute the exposed tool:
+
+await document.modelContext.executeTool(
+  flagTool,
+  JSON.stringify({ label: "WebMCP Host" })
+);
+
+The important point is that the reviewer does not directly access the iframe's contentDocument. Normal browser same-origin rules still apply. Instead, WebMCP allows the parent document to discover authorized tools from descendant frames through getTools({ fromOrigins: [...] }).
+
+Other NodeCraft tools remain unavailable cross-origin because only flag_for_review is registered with exposedTo.
+
+Note: Chrome currently requires cross-origin entries supplied through exposedTo and fromOrigins to be secure origins. For the most reliable cross-origin demo, use HTTPS origins.
+
+Testing tools manually
+
+With the app running and a WebMCP-enabled browser (or the MCP-B polyfill):
+
 // List everything currently registered
+
 const tools = await document.modelContext.getTools();
+
 console.log(tools.map(t => t.name));
+
 // → ["create_canvas_node", "connect_nodes", "auto_layout_nodes", "remove_node", "disconnect_nodes"]
+
 // ("flag_for_review" only appears here too if called same-origin — it's
 // otherwise scoped to REVIEWER_ORIGINS, see above)
 
 // Invoke one
+
 const layoutTool = tools.find(t => t.name === "auto_layout_nodes");
-await document.modelContext.executeTool(layoutTool, JSON.stringify({ layoutType: "grid" }));
-```
+
+await document.modelContext.executeTool(
+  layoutTool,
+  JSON.stringify({ layoutType: "grid" })
+);

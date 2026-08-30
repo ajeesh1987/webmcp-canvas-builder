@@ -430,6 +430,7 @@ export default function App() {
         description:
           "Returns every node (id, label, type, position, origin, flagged) and every connection currently on the canvas. Call this before auto_layout_nodes or connect_nodes if you need to reason about the current layout rather than act blind.",
         inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
         execute: async () => ({
           status: "success",
           nodes: stateRef.current.nodes,
@@ -443,10 +444,22 @@ export default function App() {
         inputSchema: {
           type: "object",
           properties: {
-            label: { type: "string", description: "Node title" },
-            type: { type: "string", description: "Component type (e.g., Database, Service)" },
-            x: { type: "number" },
-            y: { type: "number" },
+            label: {
+              type: "string",
+              description: "Visible title of the node",
+            },
+            type: {
+              type: "string",
+              description: "Architectural component type, for example Frontend, Service, Database, Cache, Queue, or External",
+            },
+            x: {
+              type: "number",
+              description: "Horizontal canvas position in pixels",
+            },
+            y: {
+              type: "number",
+              description: "Vertical canvas position in pixels",
+            },
           },
           required: ["label"],
         },
@@ -472,8 +485,14 @@ export default function App() {
         inputSchema: {
           type: "object",
           properties: {
-            fromLabel: { type: "string" },
-            toLabel: { type: "string" },
+            fromLabel: {
+              type: "string",
+              description: "Label or partial label of the source node",
+            },
+            toLabel: {
+              type: "string",
+              description: "Label or partial label of the destination node",
+            },
           },
           required: ["fromLabel", "toLabel"],
         },
@@ -482,6 +501,11 @@ export default function App() {
           const source = currentNodes.find((n) => n.label.toLowerCase().includes(input.fromLabel.toLowerCase()));
           const target = currentNodes.find((n) => n.label.toLowerCase().includes(input.toLabel.toLowerCase()));
           if (!source || !target) return { status: "error", error: "Nodes not found" };
+
+          const alreadyConnected = stateRef.current.connections.some(
+            (connection) => connection.from === source.id && connection.to === target.id
+          );
+          if (alreadyConnected) return { status: "error", error: "Nodes already connected" };
 
           const seq = commit(({ nodes, connections }) => ({
             nodes,
@@ -543,8 +567,14 @@ export default function App() {
         inputSchema: {
           type: "object",
           properties: {
-            fromLabel: { type: "string" },
-            toLabel: { type: "string" },
+            fromLabel: {
+              type: "string",
+              description: "Label or partial label of the source node",
+            },
+            toLabel: {
+              type: "string",
+              description: "Label or partial label of the destination node",
+            },
           },
           required: ["fromLabel", "toLabel"],
         },
