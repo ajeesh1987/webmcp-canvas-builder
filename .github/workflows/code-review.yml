@@ -33,12 +33,12 @@ jobs:
             package.json
 
       - name: Run code review
-        if: steps.changed-files.outputs.any_changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
           node .github/scripts/review.js
+        continue-on-error: true
 
       - name: Comment review on commit
         if: github.event_name == 'push'

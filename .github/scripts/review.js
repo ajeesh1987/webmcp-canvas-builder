@@ -4,7 +4,17 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const changedFiles = process.env.CHANGED_FILES?.split('\n').filter(Boolean) || [];
+const changedFilesEnv = process.env.CHANGED_FILES || '';
+const changedFiles = changedFilesEnv
+  .split('\n')
+  .map(f => f.trim())
+  .filter(f => f.length > 0);
+
+console.log(`📝 GitHub Actions - Code Review`);
+console.log(`CHANGED_FILES env:`, changedFilesEnv.substring(0, 100) || '(empty)');
+console.log(`Parsed files count:`, changedFiles.length);
+console.log(`Parsed files:`, changedFiles);
+
 const issues = [];
 
 // Review rules
@@ -71,31 +81,48 @@ const rules = {
 };
 
 // Process changed files
+console.log(`📂 Processing ${changedFiles.length} changed file(s)...`);
 changedFiles.forEach(file => {
-  if (!fs.existsSync(file)) return;
+  const trimmed = file.trim();
+  if (!trimmed) return;
   
-  const content = fs.readFileSync(file, 'utf8');
+  if (!fs.existsSync(trimmed)) {
+    console.log(`⚠️  File not found: ${trimmed}`);
+    return;
+  }
   
-  Object.values(rules).forEach(rule => {
-    try {
-      const ruleIssues = rule(file, content);
-      ruleIssues.forEach(issue => {
-        issues.push({ file, ...issue });
-      });
-    } catch (err) {
-      console.error(`Error in rule for ${file}:`, err.message);
-    }
-  });
+  try {
+    const content = fs.readFileSync(trimmed, 'utf8');
+    console.log(`✓ Scanning ${trimmed}`);
+    
+    Object.values(rules).forEach(rule => {
+      try {
+        const ruleIssues = rule(trimmed, content);
+        ruleIssues.forEach(issue => {
+          issues.push({ file: trimmed, ...issue });
+        });
+      } catch (err) {
+        console.error(`❌ Error in rule for ${trimmed}:`, err.message);
+      }
+    });
+  } catch (err) {
+    console.error(`❌ Failed to read ${trimmed}:`, err.message);
+  }
 });
 
 // Write output for GitHub Actions to consume
 const output = {
   timestamp: new Date().toISOString(),
-  filesReviewed: changedFiles.length,
+  filesReviewed: changedFiles.filter(f => f.trim()).length,
   issuesFound: issues.length,
   issues: issues.slice(0, 10) // Limit to 10 issues
 };
 
-fs.writeFileSync('.github/review-output.json', JSON.stringify(output, null, 2));
-console.log(`✅ Review complete: ${issues.length} issue(s) found`);
-console.log(JSON.stringify(output, null, 2));
+try {
+  fs.writeFileSync('.github/review-output.json', JSON.stringify(output, null, 2));
+  console.log(`✅ Review complete: ${issues.length} issue(s) found`);
+  console.log(JSON.stringify(output, null, 2));
+} catch (err) {
+  console.error(`❌ Failed to write output:`, err.message);
+  process.exit(1);
+}
