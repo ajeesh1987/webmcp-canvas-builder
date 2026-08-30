@@ -11,7 +11,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  commits: write
 
 jobs:
   review:
@@ -48,7 +47,7 @@ jobs:
               const review = JSON.parse(fs.readFileSync(reviewFile, 'utf8'));
               if (review.issues && review.issues.length > 0) {
                 const body = review.issues.map(i => `- **${i.file}**: ${i.message}`).join('\n');
-                github.rest.git.createComment({
+                github.rest.repos.createCommitComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   commit_sha: context.sha,
