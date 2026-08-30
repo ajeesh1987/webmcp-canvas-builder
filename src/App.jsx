@@ -65,14 +65,20 @@ export default function App() {
   const pulsesRef = useRef([]); // [{ nodeId, startedAt }]
   const rafRef = useRef(null);
   const agentTimeoutRef = useRef(null);
+  const commitSeqRef = useRef(0); // identifies each undoable action, for reconciling with the activity log
 
   useEffect(() => {
     stateRef.current = { nodes, connections, selectedNodeId };
     drawCanvas();
   }, [nodes, connections, selectedNodeId]);
 
-  const logActivity = (actor, text) => {
-    setActivity((prev) => [{ id: `${Date.now()}-${Math.random()}`, actor, text, time: nowLabel() }, ...prev].slice(0, 8));
+  // `commitSeq`, when given, ties this log line to a specific undoable
+  // action so undo/redo can mark it reverted/restored later.
+  const logActivity = (actor, text, commitSeq = null) => {
+    setActivity(
+      (prev) =>
+        [{ id: `${Date.now()}-${Math.random()}`, actor, text, time: nowLabel(), commitSeq, reverted: false }, ...prev].slice(0, 8)
+    );
     if (actor === "agent") {
       setAgentActive(true);
       clearTimeout(agentTimeoutRef.current);
@@ -86,52 +92,61 @@ export default function App() {
   };
 
   // Pushes a pre-change snapshot onto the undo stack and clears redo —
-  // any new action invalidates whatever was available to redo.
+  // any new action invalidates whatever was available to redo. Returns the
+  // seq assigned to this action so the caller can tag its activity log line.
   const commitSnapshot = (prevSnapshot) => {
-    setHistory((h) => [...h, prevSnapshot].slice(-50));
+    commitSeqRef.current += 1;
+    const seq = commitSeqRef.current;
+    setHistory((h) => [...h, { ...prevSnapshot, seq }].slice(-50));
     setFuture([]);
+    return seq;
   };
 
   // Applies a state change while recording what came before it. `producer`
   // receives the current { nodes, connections } and returns the next value.
+  // Returns the commit seq — pass it to logActivity to keep the feed in
+  // sync with undo/redo.
   const commit = (producer) => {
     const prevSnapshot = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
     const next = producer(prevSnapshot);
-    commitSnapshot(prevSnapshot);
+    const seq = commitSnapshot(prevSnapshot);
     setNodes(next.nodes);
     setConnections(next.connections);
+    return seq;
   };
 
   const undo = () => {
     if (history.length === 0) return;
     const last = history[history.length - 1];
-    const current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
+    const current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections, seq: last.seq };
     setHistory((h) => h.slice(0, -1));
     setFuture((f) => [...f, current]);
     setNodes(last.nodes);
     setConnections(last.connections);
+    setActivity((prev) => prev.map((a) => (a.commitSeq === last.seq ? { ...a, reverted: true } : a)));
     logActivity("human", "Undid last change");
   };
 
   const redo = () => {
     if (future.length === 0) return;
     const last = future[future.length - 1];
-    const current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
+    const current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections, seq: last.seq };
     setFuture((f) => f.slice(0, -1));
     setHistory((h) => [...h, current]);
     setNodes(last.nodes);
     setConnections(last.connections);
+    setActivity((prev) => prev.map((a) => (a.commitSeq === last.seq ? { ...a, reverted: false } : a)));
     logActivity("human", "Redid last change");
   };
 
   const removeNodeById = (id, actor = "agent") => {
     const node = stateRef.current.nodes.find((n) => n.id === id);
     if (!node) return false;
-    commit(({ nodes, connections }) => ({
+    const seq = commit(({ nodes, connections }) => ({
       nodes: nodes.filter((n) => n.id !== id),
       connections: connections.filter((c) => c.from !== id && c.to !== id),
     }));
-    logActivity(actor, `Removed <b>${node.label}</b>`);
+    logActivity(actor, `Removed <b>${node.label}</b>`, seq);
     return true;
   };
 
@@ -339,8 +354,8 @@ export default function App() {
   const handleMouseUp = () => {
     if (draggingNodeId && dragMoved.current) {
       const node = stateRef.current.nodes.find((n) => n.id === draggingNodeId);
-      if (node) logActivity("human", `Moved <b>${node.label}</b>`);
-      if (dragStartSnapshotRef.current) commitSnapshot(dragStartSnapshotRef.current);
+      const seq = dragStartSnapshotRef.current ? commitSnapshot(dragStartSnapshotRef.current) : null;
+      if (node) logActivity("human", `Moved <b>${node.label}</b>`, seq);
     }
     dragStartSnapshotRef.current = null;
     setDraggingNodeId(null);
@@ -444,8 +459,8 @@ export default function App() {
             y: input.y || Math.floor(Math.random() * 200) + 100,
             origin: "agent",
           };
-          commit(({ nodes, connections }) => ({ nodes: [...nodes, newNode], connections }));
-          logActivity("agent", `Created <b>${newNode.label}</b>`);
+          const seq = commit(({ nodes, connections }) => ({ nodes: [...nodes, newNode], connections }));
+          logActivity("agent", `Created <b>${newNode.label}</b>`, seq);
           pulseNode(newNode.id);
           return { status: "success", nodeId: newNode.id };
         },
@@ -468,11 +483,11 @@ export default function App() {
           const target = currentNodes.find((n) => n.label.toLowerCase().includes(input.toLabel.toLowerCase()));
           if (!source || !target) return { status: "error", error: "Nodes not found" };
 
-          commit(({ nodes, connections }) => ({
+          const seq = commit(({ nodes, connections }) => ({
             nodes,
             connections: [...connections, { from: source.id, to: target.id }],
           }));
-          logActivity("agent", `Connected <b>${source.label}</b> → <b>${target.label}</b>`);
+          logActivity("agent", `Connected <b>${source.label}</b> → <b>${target.label}</b>`, seq);
           pulseNode(source.id);
           pulseNode(target.id);
           return { status: "success" };
@@ -490,7 +505,7 @@ export default function App() {
           required: ["layoutType"],
         },
         execute: async (input) => {
-          commit(({ nodes, connections }) => ({
+          const seq = commit(({ nodes, connections }) => ({
             nodes: nodes.map((node, idx) =>
               input.layoutType === "horizontal"
                 ? { ...node, x: 80 + idx * 210, y: 200 }
@@ -498,7 +513,7 @@ export default function App() {
             ),
             connections,
           }));
-          logActivity("agent", `Rearranged layout · <b>${input.layoutType}</b>`);
+          logActivity("agent", `Rearranged layout · <b>${input.layoutType}</b>`, seq);
           stateRef.current.nodes.forEach((n) => pulseNode(n.id));
           return { status: "success" };
         },
@@ -542,11 +557,11 @@ export default function App() {
           const existed = stateRef.current.connections.some((c) => c.from === source.id && c.to === target.id);
           if (!existed) return { status: "error", error: "No connection between those nodes" };
 
-          commit(({ nodes, connections }) => ({
+          const seq = commit(({ nodes, connections }) => ({
             nodes,
             connections: connections.filter((c) => !(c.from === source.id && c.to === target.id)),
           }));
-          logActivity("agent", `Disconnected <b>${source.label}</b> → <b>${target.label}</b>`);
+          logActivity("agent", `Disconnected <b>${source.label}</b> → <b>${target.label}</b>`, seq);
           return { status: "success" };
         },
       });
@@ -569,11 +584,11 @@ export default function App() {
           execute: async (input) => {
             const node = stateRef.current.nodes.find((n) => n.label.toLowerCase().includes(input.label.toLowerCase()));
             if (!node) return { status: "error", error: "Node not found" };
-            commit(({ nodes, connections }) => ({
+            const seq = commit(({ nodes, connections }) => ({
               nodes: nodes.map((n) => (n.id === node.id ? { ...n, flagged: true } : n)),
               connections,
             }));
-            logActivity("agent", `Flagged <b>${node.label}</b> for review`);
+            logActivity("agent", `Flagged <b>${node.label}</b> for review`, seq);
             pulseNode(node.id);
             return { status: "success" };
           },
@@ -662,10 +677,13 @@ export default function App() {
                 <div className="activity-empty">Nothing yet — move a node, or ask the agent to add one.</div>
               ) : (
                 activity.map((a) => (
-                  <div key={a.id} className={`activity-row ${a.actor}`}>
+                  <div key={a.id} className={`activity-row ${a.actor}${a.reverted ? " reverted" : ""}`}>
                     <span className="actor-dot" />
                     <span className="activity-text" dangerouslySetInnerHTML={{ __html: a.text }} />
-                    <span className="activity-time">{a.time}</span>
+                    <span className="activity-meta">
+                      {a.reverted && <span className="reverted-tag">reverted</span>}
+                      <span className="activity-time">{a.time}</span>
+                    </span>
                   </div>
                 ))
               )}

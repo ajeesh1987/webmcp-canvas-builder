@@ -327,6 +327,19 @@ button, canvas {
 .activity-row.agent .actor-dot { background: var(--agent); }
 .activity-row.human .actor-dot { background: var(--human); }
 
+.activity-row.reverted {
+  opacity: 0.5;
+}
+
+.activity-row.reverted .actor-dot {
+  background: var(--text-faint);
+}
+
+.activity-row.reverted .activity-text {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+}
+
 .activity-text {
   font-size: 12px;
   line-height: 1.4;
@@ -337,12 +350,30 @@ button, canvas {
   font-weight: 600;
 }
 
+.activity-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+
+.reverted-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
 .activity-time {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-faint);
-  margin-left: auto;
-  padding-top: 2px;
   white-space: nowrap;
 }
 
