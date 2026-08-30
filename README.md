@@ -14,6 +14,19 @@
 
 All three tools are registered in `App.jsx` inside a single `useEffect`, scoped to one `AbortController` for lifecycle cleanup. Every action an agent takes is origin-tagged (`agent` vs `human`) and surfaced in the on-canvas activity feed, so a reviewer can see — not just infer — what the agent changed.
 
+### `get_canvas_state`
+Read-only. Returns the full current graph — call this before `auto_layout_nodes` or `connect_nodes` if the agent needs to reason about what's already there instead of acting blind.
+
+```json
+{
+  "name": "get_canvas_state",
+  "description": "Returns every node (id, label, type, position, origin, flagged) and every connection currently on the canvas.",
+  "inputSchema": { "type": "object", "properties": {} }
+}
+```
+
+**Returns:** `{ status: "success", nodes: [...], connections: [...] }`
+
 ### `create_canvas_node`
 Creates a new node on the canvas.
 

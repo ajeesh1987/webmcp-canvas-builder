@@ -18,6 +18,19 @@ const COLORS = {
 const NODE_W = 176;
 const NODE_H = 64;
 
+// Mirrors the tools registered in the effect below — kept here as a flat,
+// synchronous list so the UI can render a capabilities drawer without an
+// async getTools() round-trip. Keep in sync if you add/remove a tool.
+const TOOL_CATALOG = [
+  { name: "get_canvas_state", desc: "Read all nodes & connections" },
+  { name: "create_canvas_node", desc: "Add a node" },
+  { name: "connect_nodes", desc: "Draw a connection" },
+  { name: "auto_layout_nodes", desc: "Rearrange into grid/pipeline" },
+  { name: "remove_node", desc: "Delete a node + its connections" },
+  { name: "disconnect_nodes", desc: "Remove one connection" },
+  { name: "flag_for_review", desc: "Flag a node (exposedTo reviewer origin)" },
+];
+
 // Origins allowed to see and call the review-flagging tool via WebMCP's
 // exposedTo scoping — e.g. a design-review dashboard embedded as a
 // cross-origin iframe with `allow="tools"`. Same-origin agents can always
@@ -41,7 +54,11 @@ export default function App() {
   const [draggingNodeId, setDraggingNodeId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [history, setHistory] = useState([]); // past snapshots: [{ nodes, connections }]
+  const [future, setFuture] = useState([]); // redo stack, same shape
   const dragMoved = useRef(false);
+  const dragStartSnapshotRef = useRef(null);
 
   const canvasRef = useRef(null);
   const stateRef = useRef({ nodes, connections, selectedNodeId: null });
@@ -68,11 +85,52 @@ export default function App() {
     runAnimationLoop();
   };
 
+  // Pushes a pre-change snapshot onto the undo stack and clears redo —
+  // any new action invalidates whatever was available to redo.
+  const commitSnapshot = (prevSnapshot) => {
+    setHistory((h) => [...h, prevSnapshot].slice(-50));
+    setFuture([]);
+  };
+
+  // Applies a state change while recording what came before it. `producer`
+  // receives the current { nodes, connections } and returns the next value.
+  const commit = (producer) => {
+    const prevSnapshot = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
+    const next = producer(prevSnapshot);
+    commitSnapshot(prevSnapshot);
+    setNodes(next.nodes);
+    setConnections(next.connections);
+  };
+
+  const undo = () => {
+    if (history.length === 0) return;
+    const last = history[history.length - 1];
+    const current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
+    setHistory((h) => h.slice(0, -1));
+    setFuture((f) => [...f, current]);
+    setNodes(last.nodes);
+    setConnections(last.connections);
+    logActivity("human", "Undid last change");
+  };
+
+  const redo = () => {
+    if (future.length === 0) return;
+    const last = future[future.length - 1];
+    const current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
+    setFuture((f) => f.slice(0, -1));
+    setHistory((h) => [...h, current]);
+    setNodes(last.nodes);
+    setConnections(last.connections);
+    logActivity("human", "Redid last change");
+  };
+
   const removeNodeById = (id, actor = "agent") => {
     const node = stateRef.current.nodes.find((n) => n.id === id);
     if (!node) return false;
-    setNodes((prev) => prev.filter((n) => n.id !== id));
-    setConnections((prev) => prev.filter((c) => c.from !== id && c.to !== id));
+    commit(({ nodes, connections }) => ({
+      nodes: nodes.filter((n) => n.id !== id),
+      connections: connections.filter((c) => c.from !== id && c.to !== id),
+    }));
     logActivity(actor, `Removed <b>${node.label}</b>`);
     return true;
   };
@@ -262,6 +320,7 @@ export default function App() {
     if (clickedNode) {
       setDraggingNodeId(clickedNode.id);
       dragMoved.current = false;
+      dragStartSnapshotRef.current = { nodes: stateRef.current.nodes, connections: stateRef.current.connections };
       setDragOffset({ x: mouseX - clickedNode.x, y: mouseY - clickedNode.y });
     }
   };
@@ -281,7 +340,9 @@ export default function App() {
     if (draggingNodeId && dragMoved.current) {
       const node = stateRef.current.nodes.find((n) => n.id === draggingNodeId);
       if (node) logActivity("human", `Moved <b>${node.label}</b>`);
+      if (dragStartSnapshotRef.current) commitSnapshot(dragStartSnapshotRef.current);
     }
+    dragStartSnapshotRef.current = null;
     setDraggingNodeId(null);
   };
 
@@ -300,11 +361,12 @@ export default function App() {
       e.preventDefault();
       const step = e.shiftKey ? 24 : 8;
       const { dx, dy } = arrowDeltas[e.key];
-      setNodes((prev) =>
-        prev.map((node) =>
+      commit(({ nodes, connections }) => ({
+        nodes: nodes.map((node) =>
           node.id === curSelected ? { ...node, x: node.x + dx * step, y: node.y + dy * step } : node
-        )
-      );
+        ),
+        connections,
+      }));
       return;
     }
 
@@ -321,6 +383,18 @@ export default function App() {
   };
 
   useEffect(() => {
+    const onGlobalKeyDown = (e) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod || e.key.toLowerCase() !== "z") return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onGlobalKeyDown);
+    return () => window.removeEventListener("keydown", onGlobalKeyDown);
+  }, [history, future]);
+
+  useEffect(() => {
     if (typeof document !== "undefined" && document.modelContext) {
       // WebMCP has no unregisterTool() — a tool is removed by aborting the
       // AbortSignal passed in at registration time. See:
@@ -335,6 +409,18 @@ export default function App() {
           if (err?.name !== "AbortError") console.error(err);
         });
       };
+
+      safeRegister({
+        name: "get_canvas_state",
+        description:
+          "Returns every node (id, label, type, position, origin, flagged) and every connection currently on the canvas. Call this before auto_layout_nodes or connect_nodes if you need to reason about the current layout rather than act blind.",
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => ({
+          status: "success",
+          nodes: stateRef.current.nodes,
+          connections: stateRef.current.connections,
+        }),
+      });
 
       safeRegister({
         name: "create_canvas_node",
@@ -358,7 +444,7 @@ export default function App() {
             y: input.y || Math.floor(Math.random() * 200) + 100,
             origin: "agent",
           };
-          setNodes((prev) => [...prev, newNode]);
+          commit(({ nodes, connections }) => ({ nodes: [...nodes, newNode], connections }));
           logActivity("agent", `Created <b>${newNode.label}</b>`);
           pulseNode(newNode.id);
           return { status: "success", nodeId: newNode.id };
@@ -382,7 +468,10 @@ export default function App() {
           const target = currentNodes.find((n) => n.label.toLowerCase().includes(input.toLabel.toLowerCase()));
           if (!source || !target) return { status: "error", error: "Nodes not found" };
 
-          setConnections((prev) => [...prev, { from: source.id, to: target.id }]);
+          commit(({ nodes, connections }) => ({
+            nodes,
+            connections: [...connections, { from: source.id, to: target.id }],
+          }));
           logActivity("agent", `Connected <b>${source.label}</b> → <b>${target.label}</b>`);
           pulseNode(source.id);
           pulseNode(target.id);
@@ -401,13 +490,14 @@ export default function App() {
           required: ["layoutType"],
         },
         execute: async (input) => {
-          setNodes((prev) =>
-            prev.map((node, idx) =>
+          commit(({ nodes, connections }) => ({
+            nodes: nodes.map((node, idx) =>
               input.layoutType === "horizontal"
                 ? { ...node, x: 80 + idx * 210, y: 200 }
                 : { ...node, x: 90 + (idx % 3) * 230, y: 70 + Math.floor(idx / 3) * 140 }
-            )
-          );
+            ),
+            connections,
+          }));
           logActivity("agent", `Rearranged layout · <b>${input.layoutType}</b>`);
           stateRef.current.nodes.forEach((n) => pulseNode(n.id));
           return { status: "success" };
@@ -452,7 +542,10 @@ export default function App() {
           const existed = stateRef.current.connections.some((c) => c.from === source.id && c.to === target.id);
           if (!existed) return { status: "error", error: "No connection between those nodes" };
 
-          setConnections((prev) => prev.filter((c) => !(c.from === source.id && c.to === target.id)));
+          commit(({ nodes, connections }) => ({
+            nodes,
+            connections: connections.filter((c) => !(c.from === source.id && c.to === target.id)),
+          }));
           logActivity("agent", `Disconnected <b>${source.label}</b> → <b>${target.label}</b>`);
           return { status: "success" };
         },
@@ -476,7 +569,10 @@ export default function App() {
           execute: async (input) => {
             const node = stateRef.current.nodes.find((n) => n.label.toLowerCase().includes(input.label.toLowerCase()));
             if (!node) return { status: "error", error: "Node not found" };
-            setNodes((prev) => prev.map((n) => (n.id === node.id ? { ...n, flagged: true } : n)));
+            commit(({ nodes, connections }) => ({
+              nodes: nodes.map((n) => (n.id === node.id ? { ...n, flagged: true } : n)),
+              connections,
+            }));
             logActivity("agent", `Flagged <b>${node.label}</b> for review`);
             pulseNode(node.id);
             return { status: "success" };
@@ -491,6 +587,9 @@ export default function App() {
       return () => controller.abort();
     }
   }, []);
+
+  const canUndo = history.length > 0;
+  const canRedo = future.length > 0;
 
   return (
     <div className="studio-shell">
@@ -507,6 +606,21 @@ export default function App() {
             <span className="brand-name">NodeCraft</span>
             <span className="brand-subtitle">Shared canvas · human + agent</span>
           </div>
+        </div>
+
+        <div className="history-controls">
+          <button type="button" className="history-btn" onClick={undo} disabled={!canUndo} aria-label="Undo">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M9 7L4 12l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 12h11a5 5 0 0 1 0 10h-1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button type="button" className="history-btn" onClick={redo} disabled={!canRedo} aria-label="Redo">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M15 7l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M20 12H9a5 5 0 0 0 0 10h1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
 
         <div className="presence">
@@ -617,10 +731,37 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <div className="panel-footer">
-              <span>React + Canvas API</span>
-              <span>v1.1.0</span>
+            <div className="panel-footer-row">
+              <button
+                type="button"
+                className="tools-toggle"
+                onClick={() => setToolsOpen((v) => !v)}
+                aria-expanded={toolsOpen}
+              >
+                <span className="tools-toggle-dot" />
+                WebMCP tools ({TOOL_CATALOG.length})
+                <svg
+                  className={`tools-chevron${toolsOpen ? " open" : ""}`}
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <span className="engine-tag">React + Canvas API</span>
             </div>
+            {toolsOpen && (
+              <ul className="tools-drawer">
+                {TOOL_CATALOG.map((t) => (
+                  <li key={t.name}>
+                    <code>{t.name}</code>
+                    <span>{t.desc}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </aside>
       </main>
