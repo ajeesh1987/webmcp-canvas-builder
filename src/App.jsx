@@ -103,6 +103,7 @@ export default function App() {
   const dragStartSnapshotRef = useRef(null);
 
   const canvasRef = useRef(null);
+  const importFileRef = useRef(null);
   const stateRef = useRef({ nodes, connections, selectedNodeId: null });
   const pulsesRef = useRef([]); // [{ nodeId, startedAt }]
   const rafRef = useRef(null);
@@ -201,6 +202,114 @@ export default function App() {
     }));
     logActivity(actor, `Removed <b>${node.label}</b>`, seq);
     return true;
+  };
+
+  const startNewCanvas = () => {
+    const confirmed = window.confirm(
+      "Start a new canvas? Your current canvas will be replaced. Download JSON first if you want to keep it."
+    );
+    if (!confirmed) return;
+
+    if (agentTimeoutRef.current) {
+      clearTimeout(agentTimeoutRef.current);
+      agentTimeoutRef.current = null;
+    }
+
+    setNodes(DEFAULT_GRAPH.nodes.map((node) => ({ ...node })));
+    setConnections(DEFAULT_GRAPH.connections.map((connection) => ({ ...connection })));
+    setActivity([]);
+    setHistory([]);
+    setFuture([]);
+    setSelectedNodeId(null);
+    setDraggingNodeId(null);
+    setAgentActive(false);
+    dragMoved.current = false;
+    dragStartSnapshotRef.current = null;
+    pulsesRef.current = [];
+  };
+
+  const downloadProject = () => {
+    const project = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      humanName,
+      agentName,
+      nodes: stateRef.current.nodes,
+      connections: stateRef.current.connections,
+    };
+
+    const blob = new Blob([JSON.stringify(project, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `nodecraft-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const importProject = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const project = JSON.parse(await file.text());
+
+      if (
+        project?.version !== 1 ||
+        !Array.isArray(project.nodes) ||
+        !Array.isArray(project.connections)
+      ) {
+        throw new Error("Unsupported or invalid NodeCraft project file");
+      }
+
+      const validNodes = project.nodes.every(
+        (node) =>
+          node &&
+          typeof node.id === "string" &&
+          typeof node.label === "string" &&
+          typeof node.x === "number" &&
+          typeof node.y === "number"
+      );
+
+      const nodeIds = new Set(project.nodes.map((node) => node.id));
+      const validConnections = project.connections.every(
+        (connection) =>
+          connection &&
+          typeof connection.from === "string" &&
+          typeof connection.to === "string" &&
+          nodeIds.has(connection.from) &&
+          nodeIds.has(connection.to)
+      );
+
+      if (!validNodes || !validConnections) {
+        throw new Error("Project file contains invalid nodes or connections");
+      }
+
+      setNodes(project.nodes);
+      setConnections(project.connections);
+      setHistory([]);
+      setFuture([]);
+      setSelectedNodeId(null);
+      setActivity([]);
+
+      if (typeof project.humanName === "string" && project.humanName.trim()) {
+        setHumanName(project.humanName);
+      }
+      if (typeof project.agentName === "string" && project.agentName.trim()) {
+        setAgentName(project.agentName);
+      }
+
+      logActivity("human", `Imported <b>${file.name}</b>`);
+    } catch (err) {
+      console.error(err);
+      window.alert("Could not import this NodeCraft project file.");
+    }
   };
 
   const runAnimationLoop = () => {
@@ -718,6 +827,29 @@ export default function App() {
               <path d="M15 7l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M20 12H9a5 5 0 0 0 0 10h1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
+          </button>
+        </div>
+
+        <div className="project-controls">
+          <input
+            ref={importFileRef}
+            type="file"
+            accept="application/json,.json"
+            className="import-file-input"
+            onChange={importProject}
+          />
+          <button type="button" className="project-btn" onClick={startNewCanvas}>
+            New Canvas
+          </button>
+          <button type="button" className="project-btn" onClick={downloadProject}>
+            Download JSON
+          </button>
+          <button
+            type="button"
+            className="project-btn"
+            onClick={() => importFileRef.current?.click()}
+          >
+            Import JSON
           </button>
         </div>
 
