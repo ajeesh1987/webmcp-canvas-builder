@@ -38,17 +38,59 @@ const TOOL_CATALOG = [
 // to specific *other* origins for this one tool.
 const REVIEWER_ORIGINS = ["https://webmcp-reviewer.example"];
 
+const STORAGE_KEY = "nodecraft-canvas-v1";
+
+const DEFAULT_HUMAN_NAME = "You";
+const DEFAULT_AGENT_NAME = "AI Agent";
+
+const DEFAULT_GRAPH = {
+  nodes: [
+    { id: "1", label: "User Client", type: "Frontend", x: 120, y: 210, origin: "human" },
+    { id: "2", label: "WebMCP Host", type: "Runtime", x: 470, y: 210, origin: "human" },
+  ],
+  connections: [{ from: "1", to: "2" }],
+};
+
+function loadSavedGraph() {
+  if (typeof window === "undefined") return { ...DEFAULT_GRAPH, humanName: DEFAULT_HUMAN_NAME, agentName: DEFAULT_AGENT_NAME };
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_GRAPH, humanName: DEFAULT_HUMAN_NAME, agentName: DEFAULT_AGENT_NAME };
+
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved?.nodes) || !Array.isArray(saved?.connections)) {
+      return { ...DEFAULT_GRAPH, humanName: DEFAULT_HUMAN_NAME, agentName: DEFAULT_AGENT_NAME };
+    }
+
+    return {
+      nodes: saved.nodes,
+      connections: saved.connections,
+      humanName:
+        typeof saved.humanName === "string" && saved.humanName.trim()
+          ? saved.humanName
+          : DEFAULT_HUMAN_NAME,
+      agentName:
+        typeof saved.agentName === "string" && saved.agentName.trim()
+          ? saved.agentName
+          : DEFAULT_AGENT_NAME,
+    };
+  } catch {
+    return { ...DEFAULT_GRAPH, humanName: DEFAULT_HUMAN_NAME, agentName: DEFAULT_AGENT_NAME };
+  }
+}
+
 function nowLabel() {
   const d = new Date();
   return d.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export default function App() {
-  const [nodes, setNodes] = useState([
-    { id: "1", label: "User Client", type: "Frontend", x: 120, y: 210, origin: "human" },
-    { id: "2", label: "WebMCP Host", type: "Runtime", x: 470, y: 210, origin: "human" },
-  ]);
-  const [connections, setConnections] = useState([{ from: "1", to: "2" }]);
+  const [initialGraph] = useState(loadSavedGraph);
+  const [nodes, setNodes] = useState(initialGraph.nodes);
+  const [connections, setConnections] = useState(initialGraph.connections);
+  const [humanName, setHumanName] = useState(initialGraph.humanName || DEFAULT_HUMAN_NAME);
+  const [agentName, setAgentName] = useState(initialGraph.agentName || DEFAULT_AGENT_NAME);
   const [activity, setActivity] = useState([]);
   const [agentActive, setAgentActive] = useState(false);
   const [draggingNodeId, setDraggingNodeId] = useState(null);
@@ -71,6 +113,17 @@ export default function App() {
     stateRef.current = { nodes, connections, selectedNodeId };
     drawCanvas();
   }, [nodes, connections, selectedNodeId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ nodes, connections, humanName, agentName })
+      );
+    } catch (err) {
+      console.warn("Could not save canvas locally", err);
+    }
+  }, [nodes, connections, humanName, agentName]);
 
   // `commitSeq`, when given, ties this log line to a specific undoable
   // action so undo/redo can mark it reverted/restored later.
@@ -669,14 +722,32 @@ export default function App() {
         </div>
 
         <div className="presence">
-          <span className="presence-chip human">
+          <label className="presence-chip human" title="Edit your name">
             <span className="dot" />
-            You
-          </span>
-          <span className={`presence-chip agent${agentActive ? " active" : ""}`}>
+            <input
+              className="presence-name"
+              value={humanName}
+              onChange={(e) => setHumanName(e.target.value)}
+              onBlur={() => {
+                if (!humanName.trim()) setHumanName(DEFAULT_HUMAN_NAME);
+              }}
+              aria-label="Human name"
+              maxLength={24}
+            />
+          </label>
+          <label className={`presence-chip agent${agentActive ? " active" : ""}`} title="Edit agent name">
             <span className="dot" />
-            Agent
-          </span>
+            <input
+              className="presence-name"
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+              onBlur={() => {
+                if (!agentName.trim()) setAgentName(DEFAULT_AGENT_NAME);
+              }}
+              aria-label="AI agent name"
+              maxLength={24}
+            />
+          </label>
         </div>
       </header>
 
@@ -696,6 +767,9 @@ export default function App() {
             onKeyDown={handleKeyDown}
             className={draggingNodeId ? "dragging" : ""}
           />
+          {nodes.length === 2 && activity.length === 0 && (
+            <div className="agent-build-hint">Ask your AI agent to build on this canvas</div>
+          )}
           <span className="canvas-hint">click a node → arrow keys to nudge, ⇧ for bigger steps, Delete to remove</span>
         </section>
 
@@ -709,7 +783,12 @@ export default function App() {
                 activity.map((a) => (
                   <div key={a.id} className={`activity-row ${a.actor}${a.reverted ? " reverted" : ""}`}>
                     <span className="actor-dot" />
-                    <span className="activity-text" dangerouslySetInnerHTML={{ __html: a.text }} />
+                    <div className="activity-copy">
+                      <span className="activity-actor">
+                        {a.actor === "agent" ? agentName : humanName}
+                      </span>
+                      <span className="activity-text" dangerouslySetInnerHTML={{ __html: a.text }} />
+                    </div>
                     <span className="activity-meta">
                       {a.reverted && <span className="reverted-tag">reverted</span>}
                       <span className="activity-time">{a.time}</span>

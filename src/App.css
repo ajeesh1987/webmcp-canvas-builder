@@ -165,6 +165,22 @@ button, canvas {
   transition: border-color 0.3s ease, color 0.3s ease;
 }
 
+.presence-name {
+  width: 72px;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+
+.presence-name:focus {
+  color: var(--text);
+}
+
 .presence-chip .dot {
   width: 7px;
   height: 7px;
@@ -229,6 +245,24 @@ button, canvas {
 
 .canvas-panel canvas.dragging {
   cursor: grabbing;
+}
+
+.agent-build-hint {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .canvas-hint {
@@ -338,6 +372,21 @@ button, canvas {
 .activity-row.reverted .activity-text {
   text-decoration: line-through;
   text-decoration-color: var(--text-faint);
+}
+
+.activity-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-actor {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--text-faint);
+  line-height: 1.2;
 }
 
 .activity-text {

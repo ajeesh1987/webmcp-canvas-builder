@@ -37,7 +37,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
-          node .github/scripts/review.js
+          node .github/scripts/review.cjs
         continue-on-error: true
 
       - name: Comment review on commit
