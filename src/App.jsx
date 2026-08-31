@@ -204,6 +204,30 @@ export default function App() {
     return true;
   };
 
+  const addHumanNode = () => {
+    const label = window.prompt("Node name");
+    if (!label?.trim()) return;
+
+    const typeInput = window.prompt("Node type", "Service");
+    if (typeInput === null) return;
+
+    const newNode = {
+      id: String(Date.now()),
+      label: label.trim(),
+      type: typeInput.trim() || "Service",
+      x: 120 + (stateRef.current.nodes.length % 3) * 210,
+      y: 120 + (Math.floor(stateRef.current.nodes.length / 3) % 3) * 120,
+      origin: "human",
+    };
+
+    const seq = commit(({ nodes, connections }) => ({
+      nodes: [...nodes, newNode],
+      connections,
+    }));
+    setSelectedNodeId(newNode.id);
+    logActivity("human", `Created <b>${newNode.label}</b>`, seq);
+  };
+
   const startNewCanvas = () => {
     const confirmed = window.confirm(
       "Start a new canvas? Your current canvas will be replaced. Download JSON first if you want to keep it."
@@ -838,6 +862,9 @@ export default function App() {
             className="import-file-input"
             onChange={importProject}
           />
+          <button type="button" className="project-btn add-node-btn" onClick={addHumanNode}>
+            + Add Node
+          </button>
           <button type="button" className="project-btn" onClick={startNewCanvas}>
             New Canvas
           </button>

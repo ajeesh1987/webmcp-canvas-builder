@@ -714,3 +714,16 @@ button, canvas {
     animation: none;
   }
 }
+
+/* Human canvas action */
+.add-node-btn {
+  color: var(--human);
+  border-color: rgba(59, 102, 224, 0.24);
+  background: var(--human-soft);
+}
+
+.add-node-btn:hover {
+  color: var(--human);
+  border-color: rgba(59, 102, 224, 0.4);
+  background: rgba(59, 102, 224, 0.14);
+}
